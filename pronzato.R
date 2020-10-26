@@ -1,22 +1,34 @@
 ## ----------------------------------------------------------------- ##
-## greedy.R -------------------------------------------------------- ##
+## pronzato.R ------------------------------------------------------ ##
 ## Author: Peter Norwood, NC State University ---------------------- ##
-## Purpose: run an experiment where A = argmax mu_hat -------------- ##
+## Purpose: run an experiment where -------------------------------- ##
+## A = argmax mu_hat + alpha*g, from Pronzato (2000) --------------- ##
 ## ----------------------------------------------------------------- ##
 
 ## load functions
 setwd("~/Research/Written Prelim/WrittenPrelim")
 source("funcs.R")
 
-## greedy
+## alpha_t
+## Purpose: generate alpha_t for the pronzato algorithm
+##          that satisfies theorem conditions
+## param alpha: some value > 0
+## param t: time step
+alpha_t <- function(alpha,t){
+  alpha_t <- alpha*sqrt(t)*log(t)
+  return(alpha_t)
+}
+
+## pronzato
 ## Purpose: run a greedy d-optimal experiment
 ## param train_set: dataset with context for N individuals
 ## param burn_in: sample size of simple randomization
 ## param A: vector of possible treatments
 ## param theta: true mean outcome parameter vector
 ## param sigma: standard deviation for response
+## param al: parameter that represents compromise
 ## return dat: dataframe with X,A,mu,Y,regret,norm
-greedy <- function(train_set,burn_in,A,theta,sigma){
+pronzato <- function(train_set,burn_in,A,theta,sigma,al){
   
   ## create trial dataset
   N <- nrow(train_set)
@@ -51,29 +63,37 @@ greedy <- function(train_set,burn_in,A,theta,sigma){
     ## measure the euclidean norm between theta and theta_hat
     dat[i,6] <- norm(matrix(theta-theta_hat),type="F")
     
+    ## get "I-inv" matrix
+    sigma_hat <- sigma(fit)
+    Iinv <- (i-1)*vcov(fit)/I(sigma_hat**2)
+    
+    ## alpha
+    alpha <- alpha_t(al,i)
     
     ## loop through interventions to find greedy intevention
-    info <- matrix(NA,nrow=length(A),ncol=4)
+    info <- matrix(NA,nrow=length(A),ncol=3)
     tick=1
     for(a in A){
       ## gather det if a is assigned
       temp <- data.frame(X=dat[i,1],A=a,Y=0,mu=0,regret=0,norm=0)
-      ## estiamted mean outcome given a
+      fx <- model.matrix(fit,data=temp)
+      ## reward + (alpha/t)*d_k
       mu_hat <- predict(fit,temp)
+      z <- mu_hat + (alpha/(i-1))*( fx %*% (Iinv %*% t(fx)) )
       ## true mean outcome given a
       mu <- mean_outcome(X=dat[i,1],A=a,theta=theta)
       ## save info
-      info[tick,] <- c(a,NA,mu_hat,mu)
+      info[tick,] <- c(a,z,mu)
       tick=tick+1
     }
     ## save info as dataframe
     info <- data.frame(info)
-    colnames(info) <- c("A","det","mu_hat","mu")
+    colnames(info) <- c("A","z","mu")
     
     ## assign intervention
-    dat[i,2] <- info$A[which.max(info$mu_hat)]
+    dat[i,2] <- info$A[which.max(info$z)]
     ## find mean outcome
-    dat[i,3] <- info$mu[which.max(info$mu_hat)]
+    dat[i,3] <- info$mu[which.max(info$z)]
     ## find outcome
     dat[i,4] <- rnorm(1,dat[i,3],sigma)
     ## find regret
@@ -96,8 +116,8 @@ greedy <- function(train_set,burn_in,A,theta,sigma){
 # sigma=0.2
 # 
 # train_set <- gen_data(N=500,lower=-3.0,upper=3.0,A=1:5,theta=theta,sigma=sigma)
-# test_greedy <- greedy(train_set=train_set,burn_in=50,A=1:5,
-#                theta=theta,sigma=sigma)
+# test_pronzato <- pronzato(train_set=train_set,burn_in=50,A=1:5,
+#                           theta=theta,sigma=sigma,al=1)
 # 
-# ggplot(data=test_greedy[51:nrow(test_greedy),])  +
+# ggplot(data=test_pronzato[51:nrow(test_pronzato),])  +
 #   geom_line(aes(x=sub,y=norm))
