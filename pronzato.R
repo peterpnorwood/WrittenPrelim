@@ -20,7 +20,7 @@ alpha_t <- function(alpha,t){
 }
 
 ## pronzato
-## Purpose: run a greedy d-optimal experiment
+## Purpose: run a experiment following pronzato (2000)'s method
 ## param train_set: dataset with context for N individuals
 ## param burn_in: sample size of simple randomization
 ## param A: vector of possible treatments
@@ -97,7 +97,7 @@ pronzato <- function(train_set,burn_in,A,theta,sigma,al){
     ## find outcome
     dat[i,4] <- rnorm(1,dat[i,3],sigma)
     ## find regret
-    dat[i,5] <- max(info$mu) - dat[i,4]
+    dat[i,5] <- max(info$mu) - dat[i,3]
   }
   
   dat <- data.frame(dat)

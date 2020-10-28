@@ -4,54 +4,86 @@
 ## Purpose: general functions used for the study ------------------- ##
 ## ----------------------------------------------------------------- ##
 
+library(MASS)
 
-## mean_outcome
+
+## make_design
+make_design <- function(K,p,a,X){
+  
+  ## create design
+  design <- c()
+  for(j in 1:K){
+    if(a==j){
+      x <- c(1,X)
+    }else{
+      x <- rep(0,p+1)
+    }
+    design <- c(design,x)
+  }
+  
+  return(design)
+  
+}
+
+## mean_outcome1
 ## Purpose: generate mean outcome
-## param X: context
-## param A: intervention
+## param X: p-dimensional context
+## param a: intervention
+## param A: possible interventions
 ## param theta: mean parameter vector
 ## return mu: mean response
-mean_outcome <- function(X,A,theta){
+mean_outcome1 <- function(X,a,A,theta){
   
-  ## logic to decide mean response based on A
-  if(A==1){
-      mu <- theta[1] + theta[2]*X + theta[3]*I(X**2)
-  } else if(A==2){
-    mu <- theta[4] + theta[5]*X + theta[6]*I(X**2)
-  } else if(A==3){
-    mu <- theta[7] + theta[8]*X + theta[9]*I(X**2)
-  } else if(A==4){
-    mu <- theta[10] + theta[11]*X + theta[12]*I(X**2)
-  } else{
-    mu <- theta[13] + theta[14]*X + theta[15]*I(X**2)
-  }
+  ## dimensions
+  K <- length(A)
+  p <- length(X)
+  
+  design <- make_design(K=K,p=p,a=a,X=X)
+  
+  mu <- design %*% theta
   
   ## return the mean outcome
   return(mu)
   
 }
 
-## vectorize mean outcome for X and A
-mean_outcome <- Vectorize(mean_outcome,vectorize.args = c("X","A"))
+## "vectorize" mean outcome for X and A
+mean_outcome <- function(X,a,A,theta){
+  N <- max(1,nrow(X))
+  
+  if(N==1){
+    mu <- mean_outcome1(X=X,a=a,A=A,theta=theta)
+  } else{
+    mu <- c()
+    ## loop through rows of x
+    for(n in 1:N){
+      mu[n] <- mean_outcome1(X=X[n,],a=a[n],A=A,theta=theta)
+    }
+  }
+  return(mu)
+}
 
 ## gen_data
 ## Purpose: generate datasets
 ## param N: sample size
-## param lower,upper: context x ~ unif(lower,upper)
+## param p: dimension of the context
 ## param A: vector of possible interventions
 ## param theta: mean parameter vector
 ## param sigma: standard deviation of random error
-## return dat: dataset with columns: X, A, mu, regret, Y
-gen_data <- function(N,lower,upper,A,theta,sigma){
+## return dat: dataset with columns: X, A, mu, Y
+gen_data <- function(N,p,sd_X,A,sd_Y,theta){
   
   ## generate context
-  X <- runif(N,lower,upper)
+  sd_X <- sd_X*sqrt(p+1)
+  X <- mvrnorm(N,rep(0,p),diag(p))
+  
   ## create randomly assigned A
   A_vec <- sample(A,N,replace=TRUE)
+  
   ## mean outcome
-  mu <- mean_outcome(X,A_vec,theta)
+  mu <- mean_outcome(X=X,a=A_vec,A=A,theta=theta)
   ## true outcome
-  Y <- rnorm(N,mu,sigma)
+  Y <- rnorm(N,mu,sd_Y)
   
   ## dataset to return
   dat <- data.frame(X,A=A_vec,mu,Y)
@@ -60,29 +92,5 @@ gen_data <- function(N,lower,upper,A,theta,sigma){
   
 }
 
+#test <- gen_data(N=1000,p=5,sd_X=0.5,A=1:5,sd_Y=1,theta=mvrnorm(n=1,rep(0,25),diag(25)))
 
-# theta1 <- c(3.25,0.01,0.0)
-# theta2 <- c(2.25,-0.5,0.01)
-# theta3 <- c(3.5,0.05,-0.50)
-# theta4 <- c(3.15,-0.40,-0.15)
-# theta5 <- c(2.5,0.5,-0.05)
-# theta <- c(theta1,theta2,theta3,theta4,theta5)
-# sigma=0.2
-# 
-# train_set <- gen_data(N=500,lower=-3.0,upper=3.0,A=1:5,theta=theta,sigma=sigma)
-# ggplot(data=dat) +
-#   geom_line(aes(x=X,y=Y,color=as.factor(A),group=as.factor(A)))
-# 
-# fit <- lm(Y~-1+as.factor(A) + as.factor(A):(X+I(X**2)),data=dat)
-# X <- model.matrix(fit)
-# XtX <- t(X) %*% X
-# lst[i] <- det(XtX)
-# 
-# 
-# coef_fit <- coef(fit)
-# theta_hat <- c(coef_fit[1],coef_fit[6],coef_fit[11],
-#                coef_fit[2],coef_fit[7],coef_fit[12],
-#                coef_fit[3],coef_fit[8],coef_fit[13],
-#                coef_fit[4],coef_fit[9],coef_fit[14],
-#                coef_fit[5],coef_fit[10],coef_fit[15])
-# norm(theta-theta_hat,"2")

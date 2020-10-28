@@ -1,22 +1,22 @@
 ## ----------------------------------------------------------------- ##
-## d_opt.R --------------------------------------------------------- ##
+## e_greedy.R ------------------------------------------------------ ##
 ## Author: Peter Norwood, NC State University ---------------------- ##
-## Purpose: run an experiment where A = argmax det(XtX) ------------ ##
+## Purpose: run an experiment with e-greedy randomization ---------- ##
 ## ----------------------------------------------------------------- ##
 
 ## load functions
 setwd("~/Research/Written Prelim/WrittenPrelim")
 source("funcs.R")
 
-## d_opt
-## Purpose: run a sequential d-optimal experiment
+## e_greedy
+## Purpose: run a e_greedy experiment
 ## param train_set: dataset with context for N individuals
 ## param burn_in: sample size of simple randomization
 ## param A: vector of possible treatments
 ## param theta: true mean outcome parameter vector
 ## param sigma: standard deviation for response
 ## return dat: dataframe with X,A,mu,Y,regret,norm
-d_opt <- function(train_set,burn_in,A,theta,sigma){
+e_greedy <- function(train_set,burn_in,A,theta,sigma,eps){
   
   ## create trial dataset
   N <- nrow(train_set)
@@ -31,7 +31,7 @@ d_opt <- function(train_set,burn_in,A,theta,sigma){
   dat[1:burn_in,4] <- train_set$Y[1:burn_in]
   ## name the same colnames
   colnames(dat) <- c(colnames(train_set),"regret","norm")
-
+  
   ## loop through the new patients
   for(i in (burn_in+1):N){
     
@@ -43,43 +43,46 @@ d_opt <- function(train_set,burn_in,A,theta,sigma){
     ## gather parameter convergence information
     coef_fit <- coef(fit)
     theta_hat <- c(coef_fit[1],coef_fit[6],coef_fit[11],
-                    coef_fit[2],coef_fit[7],coef_fit[12],
-                    coef_fit[3],coef_fit[8],coef_fit[13],
-                    coef_fit[4],coef_fit[9],coef_fit[14],
-                    coef_fit[5],coef_fit[10],coef_fit[15])
+                   coef_fit[2],coef_fit[7],coef_fit[12],
+                   coef_fit[3],coef_fit[8],coef_fit[13],
+                   coef_fit[4],coef_fit[9],coef_fit[14],
+                   coef_fit[5],coef_fit[10],coef_fit[15])
     
     ## measure the euclidean norm between theta and theta_hat
     dat[i,6] <- norm(matrix(theta-theta_hat),type="F")
     
     
-    ## loop through interventions to find d-opt intevention
-    info <- matrix(NA,nrow=length(A),ncol=4)
+    ## loop through interventions to find greedy intevention
+    info <- matrix(NA,nrow=length(A),ncol=3)
     tick=1
     for(a in A){
       ## gather det if a is assigned
       temp <- data.frame(X=dat[i,1],A=a,Y=0,mu=0,regret=0,norm=0)
-      temp_X <- model.matrix(fit,data=rbind(prev,temp))
-      det_XtX <- det(t(temp_X) %*% temp_X) 
       ## estiamted mean outcome given a
       mu_hat <- predict(fit,temp)
       ## true mean outcome given a
       mu <- mean_outcome(X=dat[i,1],A=a,theta=theta)
       ## save info
-      info[tick,] <- c(a,det_XtX,mu_hat,mu)
+      info[tick,] <- c(a,mu_hat,mu)
       tick=tick+1
     }
     ## save info as dataframe
     info <- data.frame(info)
-    colnames(info) <- c("A","det","mu_hat","mu")
+    colnames(info) <- c("A","mu_hat","mu")
     
-    ## assign intervention
-    dat[i,2] <- info$A[which.max(info$det)]
+    ## randomize via e-greedy
+    prob_vec <- rep(eps/(length(A)-1),length(A))
+    prob_vec[which.max(info$mu_hat)] <- 1-eps
+    
+    ## assign intervention (e-greedy)
+    dat[i,2] <- sample(A,1,prob=prob_vec)
     ## find mean outcome
-    dat[i,3] <- info$mu[which.max(info$det)]
+    dat[i,3] <- info$mu[dat[i,2]]
     ## find outcome
     dat[i,4] <- rnorm(1,dat[i,3],sigma)
     ## find regret
     dat[i,5] <- max(info$mu) - dat[i,3]
+    
   }
   
   dat <- data.frame(dat)
@@ -96,10 +99,12 @@ d_opt <- function(train_set,burn_in,A,theta,sigma){
 # theta5 <- c(2.5,0.5,-0.05)
 # theta <- c(theta1,theta2,theta3,theta4,theta5)
 # sigma=0.2
-# 
+#  
 # train_set <- gen_data(N=500,lower=-3.0,upper=3.0,A=1:5,theta=theta,sigma=sigma)
-# test_d_opt <- d_opt(train_set=train_set,burn_in=50,A=1:5,
-#               theta=theta,sigma=sigma)
+# test_e_greedy <- e_greedy(train_set=train_set,burn_in=50,A=1:5,
+#                           theta=theta,sigma=sigma,eps=0.1)
 # 
-# ggplot(data=test_d_opt[51:nrow(test_d_opt),])  +
-#   geom_line(aes(x=sub,y=norm))
+# hist(test_e_greedy$regret)
+#  
+#  ggplot(data=test_e_greedy[51:nrow(test_e_greedy),])  +
+#    geom_line(aes(x=sub,y=norm))
