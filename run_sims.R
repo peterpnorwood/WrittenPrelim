@@ -12,7 +12,7 @@ library(parallel)
 ## run the simulations
 
 ## parameters
-p=2
+p=8
 K=8
 
 N=1000

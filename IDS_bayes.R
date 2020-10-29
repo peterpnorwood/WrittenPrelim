@@ -7,7 +7,6 @@
 ## load functions
 setwd("~/Research/Written Prelim/WrittenPrelim")
 source("funcs.R")
-library(rstanarm)
 library(MASS)
 
 
@@ -24,11 +23,31 @@ calc_ir <- function(M,mu,Sigma,A,context){
   ## sample from posterior
   posterior_sample <- mvrnorm(n=M,mu=mu,Sigma=Sigma)
   
+  ## rearrange posterior samples to match our parameterization
+  theta_sample <- matrix(NA,nrow=nrow(posterior_sample),
+                      ncol=ncol(posterior_sample))
+  for(m in 1:M){    
+    ## put them in the same format as the theta vector
+    coef_fit <- posterior_sample[m,]
+    theta_hat <- c()
+    tik <- 1
+    for(ii in 1:K){
+      for(jj in 0:p){
+        theta_hat[tik] <- coef_fit[ii+(K)*jj]
+        tik=tik+1
+      }
+    }
+    ## update matrix
+    theta_sample[m,] <- theta_hat
+    
+  }
+  
   ## create mu_hat
-  mu_hat <- (1/M)*colSums(posterior_sample)
+  mu_hat <- (1/M)*colSums(theta_sample)
   
   ## see how often each piece is maximized
   maxs <- c()
+  
   for(m in 1:M){
     ## get estimated value for each a
     ests <- c()
@@ -36,12 +55,25 @@ calc_ir <- function(M,mu,Sigma,A,context){
       ## rearrange context
       ctx <- make_design(K=K,p=p,a=a,X=context)
       ## estimated mean response
-      ests[a] <- ctx %*% posterior_sample[m,]
+      ests[a] <- ctx %*% theta_sample[m,]
     }
     ## save max
     maxs[m] <- which.max(ests)
   }
   max_df <- data.frame(max=maxs,m=1:M)
+  
+  ## if there is no separation, then pick the opt txt
+  if(length(unique(max_df$max))==1){
+    ir <- c()
+    for(a in A){
+      if(a==unique(max_df$max)){
+        ir[a] <- 1
+      }else{
+        ir[a] <- 2
+      }
+    }
+    
+  }else{
   
   ## create p_star, mu_starm, L, rho_star
   p_star <- c()
@@ -56,7 +88,7 @@ calc_ir <- function(M,mu,Sigma,A,context){
     }else if(p_star[a]==1/M){
       ## subset the ms
       ms <- max_df$m[max_df$max==a]
-      mu_a[[a]] <- posterior_sample[ms,]
+      mu_a[[a]] <- theta_sample[ms,]
       ## create L
       L <- L + p_star[a]*( (mu_a[[a]]-mu_hat) %*% t((mu_a[[a]]-mu_hat)))
       ## create rho_star
@@ -65,7 +97,7 @@ calc_ir <- function(M,mu,Sigma,A,context){
     }else{
       ## subset the ms
       ms <- max_df$m[max_df$max==a]
-      mu_a[[a]] <- colSums(posterior_sample[ms,])/length(ms)
+      mu_a[[a]] <- colSums(theta_sample[ms,])/length(ms)
       ## create L
       L <- L + p_star[a]*( (mu_a[[a]]-mu_hat) %*% t((mu_a[[a]]-mu_hat)))
       ## create rho_star
@@ -84,6 +116,7 @@ calc_ir <- function(M,mu,Sigma,A,context){
     v_a[a] <- t(ctx) %*% (L %*% ctx) 
     delta_a[a] <- rho_star - ctx %*% mu_hat
     ir[a] <- (delta_a[a]**2)/v_a[a]
+  }
   }
   
   return(ir)
@@ -155,7 +188,7 @@ IDS_bayes <- function(train_set,burn_in,A,theta,sd_Y,M){
     info <- matrix(NA,nrow=length(A),ncol=4)
     
     ## calcualte information ratio
-    ir <- calc_ir(M=M,mu=theta_hat,Sigma=vcov(fit),A=1:K,context=dat[i,1:p])
+    ir <- calc_ir(M=M,mu=coef_fit,Sigma=vcov(fit),A=1:K,context=dat[i,1:p])
     ## calculate true mean outcomes
     mean_outcomes <- c()
     for(a in A){
@@ -180,13 +213,34 @@ IDS_bayes <- function(train_set,burn_in,A,theta,sd_Y,M){
   
 }
 
-
-# p <- 5
-# K=5
+# df <- data.frame()
+# for(b in 1:5){
+# p=8
+# K=8
 # theta <- rnorm((p+1)*K,0,1)
-# train_set <- gen_data(N=500,p=p,sd_X=0.5,A=1:K,sd_Y=1,theta=theta)
+# train_set <- gen_data(N=1000,p=p,sd_X=1,A=1:K,sd_Y=0.5*sqrt(p),theta=theta)
 # test_IDS <- IDS_bayes(train_set=train_set,burn_in=(p+1)*K*3,A=1:K,theta=theta,sd_Y=1,
-#                       M=100)
+#                       M=1000)
+# 
+# test_IDS$rep=b
+# df <- rbind(df,test_IDS)
+# }
+# 
+# 
+# burn_in=(p+1)*K*3
+# ## analyze cumulative regret 
+# regret <- df %>% filter(sub>burn_in) %>%
+#   group_by(rep) %>%
+#   mutate(cum_regret=cumsum(regret)) %>%
+#   group_by(sub) %>%
+#   summarise(mean_regret=mean(cum_regret),
+#             median_regret=median(cum_regret),
+#             sd_regret=sd(cum_regret))
+# 
+# 
+# ggplot(data=regret) +
+#   geom_line(aes(x=sub,y=mean_regret))
+# 
 # #
 # # hist(test_greedy$regret)
 # # #
