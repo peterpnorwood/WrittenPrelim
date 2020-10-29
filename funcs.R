@@ -69,14 +69,25 @@ mean_outcome <- function(X,a,A,theta){
 ## param p: dimension of the context
 ## param A: vector of possible interventions
 ## param theta: mean parameter vector
-## param sigma: standard deviation of random error
+## param sd_X: standard deviation of random error
 ## return dat: dataset with columns: X, A, mu, Y
 gen_data <- function(N,p,sd_X,A,sd_Y,theta){
   
   ## generate context
-  sd_X <- sd_X*sqrt(p+1)
-  X <- mvrnorm(N,rep(0,p),diag(p))
-  
+  X <- 0.5*mvrnorm(N,rep(0,p),sd_X*diag(p))
+  ## truncate
+  for(i in 1:N){
+    for(j in 1:p){
+      if(X[i,j] < 1 & X[i,j] > -1){
+        ## do nothin
+      }else if(X[i,j] <= -1){
+        X[i,j]=-1
+      }else if(X[i,j] >= 1){
+        X[i,j]=1
+      }
+    }
+  }
+
   ## create randomly assigned A
   A_vec <- sample(A,N,replace=TRUE)
   

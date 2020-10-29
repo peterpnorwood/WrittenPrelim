@@ -112,13 +112,13 @@ IDS_freq <- function(train_set,burn_in,A,theta,sd_Y){
 }
 
 
-p <- 5
-K=5
-theta <- rnorm((p+1)*K,0,1)
-train_set <- gen_data(N=500,p=p,sd_X=0.5,A=1:K,sd_Y=1,theta=theta)
-test_IDS <- IDS_freq(train_set=train_set,burn_in=(p+1)*K*3,A=1:K,theta=theta,sd_Y=1)
-#
-# hist(test_greedy$regret)
+# p <- 5
+# K=5
+# theta <- rnorm((p+1)*K,0,1)
+# train_set <- gen_data(N=500,p=p,sd_X=0.5,A=1:K,sd_Y=1,theta=theta)
+# test_IDS <- IDS_freq(train_set=train_set,burn_in=(p+1)*K*3,A=1:K,theta=theta,sd_Y=1)
 # #
-ggplot(data=test_IDS[((p+1)*K*3+1):nrow(test_IDS),])  +
-    geom_line(aes(x=sub,y=norm))
+# # hist(test_greedy$regret)
+# # #
+# ggplot(data=test_IDS[((p+1)*K*3+1):nrow(test_IDS),])  +
+#     geom_line(aes(x=sub,y=norm))
