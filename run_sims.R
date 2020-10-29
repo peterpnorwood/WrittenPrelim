@@ -12,20 +12,20 @@ library(parallel)
 ## run the simulations
 
 ## parameters
-p=8
-K=8
+p=2
+K=2
 
 N=1000
 sd_X=1
 sd_Y=0.5
 t0=(p+1)*K*3+100
-eps=0.05
+eps=0.025
 al=0.01
 N_post=500
 M=100
 
 ## how many simulations to run
-r <- 100
+r <- 5
 ## Simulate the experiments
 start <- Sys.time()
 sims <- mclapply(X=1:r, 

@@ -29,13 +29,8 @@ exps <- exps %>%
                burn_in=3*(p+1)*K)
 
 
-## remove missing R values for greedy first 
-r1 <- exps %>% filter(R==1)
-unique(r1$rep)
-hist(r1$sub)
-
 ## analyze cumulative regret 
-regret <- exps %>% filter(sub>burn_in & method!="greedy_first") %>%
+regret <- exps %>% filter(sub>burn_in) %>%
   group_by(scenario,method,rep) %>%
   mutate(cum_regret=cumsum(regret)) %>%
   group_by(scenario,method,sub) %>%
@@ -53,7 +48,7 @@ ggplot(data=regret) +
 
 
 ## analyze proportion of correctimal intervention
-correct <- exps %>% filter(sub>burn_in & method!="greedy_first") %>%
+correct <- exps %>% filter(sub>burn_in) %>%
   group_by(scenario,method,rep) %>%
   mutate(correct=ifelse(regret==0,1,0),
          cum_correct=cumsum(correct),
@@ -71,7 +66,7 @@ ggplot(data=correct) +
   facet_wrap(vars(scenario),scales="free") 
 
 ## analyze convergence
-theta <- exps %>% filter(sub>burn_in & method!="greedy_first") %>%
+theta <- exps %>% filter(sub>burn_in) %>%
   group_by(scenario,method,sub) %>%
   mutate(rel_efficiency=simple_norm/norm) %>%
   summarise(mean_norm=mean(norm),

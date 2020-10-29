@@ -46,8 +46,6 @@ greedy_first <- function(train_set,burn_in,A,theta,sd_Y,t0,eps){
   R=0
   ## loop through the new patients
   for(i in (burn_in+1):N){
-    
-    
     ## fit the outcome model
     X_temp <- dat[1:(i-1),1:p]
     A_temp <- dat[1:(i-1),p+1]
@@ -128,19 +126,6 @@ greedy_first <- function(train_set,burn_in,A,theta,sd_Y,t0,eps){
       ## then check again
       ## if there wasn't then no need to check
       if(R==0){
-      ## check to see if we have covariate diversity
-      X_t1 <- model.matrix(fit)
-      M_t1 <- t(X_t0) %*% X_t0
-      eig_M_t1 <- eigen(M_t1)
-      lambda1 <- min(eig_M_t1$values)
-      R <- R+ifelse(lambda1 < lambda0*(i-1)*0.25,1,0)
-      } else{ 
-        ## do nothing
-      }
-      
-      ## now choose greedy if R is 0 and do eps-greedy otherwise
-      if(R==0){
-        
         ## assign intervention (greedy)
         dat[i,p+1] <- info$A[which.max(info$mu_hat)]
         ## find mean outcome
@@ -150,9 +135,15 @@ greedy_first <- function(train_set,burn_in,A,theta,sd_Y,t0,eps){
         ## find regret
         dat[i,p+4] <- max(info$mu) - dat[i,p+2]
         dat[i,p+6] <- R
-        
-      } else if(R>0){
-        
+      
+        ## check to see if we have covariate diversity
+        X_t1 <- model.matrix(fit)
+        M_t1 <- t(X_t0) %*% X_t0
+        eig_M_t1 <- eigen(M_t1)
+        lambda1 <- min(eig_M_t1$values)
+        R <- R+ifelse(lambda1 < lambda0*(i-1)*0.25,1,0)
+      
+      } else{ 
         ## randomize via e-greedy
         prob_vec <- rep(eps/(length(A)-1),length(A))
         prob_vec[which.max(info$mu_hat)] <- 1-eps
@@ -160,13 +151,12 @@ greedy_first <- function(train_set,burn_in,A,theta,sd_Y,t0,eps){
         ## assign intervention (e-greedy)
         dat[i,p+1] <- sample(A,1,prob=prob_vec)
         ## find mean outcome
-        dat[i,p+2] <- info$mu[dat[i,p+2]]
+        dat[i,p+2] <- info$mu[dat[i,p+1]]
         ## find outcome
         dat[i,p+3] <- rnorm(1,dat[i,p+2],sd_Y)
         ## find regret
         dat[i,p+4] <- max(info$mu) - dat[i,p+2]
         dat[i,p+6] <- R
-        
       }
       
       
@@ -181,15 +171,21 @@ greedy_first <- function(train_set,burn_in,A,theta,sd_Y,t0,eps){
   
 }
 
-# p <- 5
-# K=5
+# p <- 2
+# K=8
+# A=1:K
 # theta <- rnorm((p+1)*K,0,1)
-# train_set <- gen_data(N=500,p=p,sd_X=0.5,A=1:K,sd_Y=1,theta=theta)
-# test_gf <- greedy_first(train_set=train_set,burn_in=(p+1)*K*2,A=1:K,
+# N=2000
+# sd_Y <- 0.5*sqrt(p)
+# burn_in=(p+1)*K*3
+# t0 = burn_in+100
+# eps=0.05
+# train_set <- gen_data(N=2000,p=p,sd_X=0.5,A=1:K,sd_Y=sd_Y,theta=theta)
+# test_gf <- greedy_first(train_set=train_set,burn_in=(p+1)*K*3,A=1:K,
 #                         theta=theta,t0=100,sd_Y=1,eps=0.1)
-# # # 
+# # #
 # hist(test_greedy$regret)
-# # # # 
+# # # #
 # ggplot(data=test_gf[((p+1)*K*2+1):nrow(test_gf),])  +
 #      geom_line(aes(x=sub,y=norm))
 
