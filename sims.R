@@ -44,6 +44,7 @@ clusterExport(cl,c('mean_outcome','mean_outcome1',
 ## param N_post: sample to take out of the experiment
 ## param M: samples to take out of posterior distribution for IDS
 ## return output: list of trial information from each method
+##                and out of trial information
 sim <- function(N,p,K,sd_X,sd_Y,
                 t0,eps,al,N_post,M){
   
@@ -115,6 +116,10 @@ sim <- function(N,p,K,sd_X,sd_Y,
                                        post_data=post_data,
                                        p=p,K=K,theta=theta))
   
+  post_simple <- try(post_experiment(exp_data=train_set,
+                                        post_data=post_data,
+                                        p=p,K=K,theta=theta))
+  
   
   
   ## save output in a list
@@ -131,176 +136,11 @@ sim <- function(N,p,K,sd_X,sd_Y,
                       greedy=post_greedy,
                       greedy_first=post_greedy_first,
                       IDS_freq=post_IDS_freq,
-                      IDS_bayes=post_IDS_bayes)
+                      IDS_bayes=post_IDS_bayes,
+                      simple=post_simple)
   
-  output <- list(exp=exp_output,post=post_output)
+  output <- list(exp=exp_output,post=post_output,theta=theta)
   
   return(output)
   
 }
-
-## run the simulations
-
-## parameters
-N=500
-p=5
-K=10
-sd_X=1
-sd_Y=0.5
-t0=(p+1)*K*3+100
-eps=0.05
-al=0.05
-N_post=500
-M=100
-
-## how many simulations to run
-r <- 25
-## Simulate the experiments
-start <- Sys.time()
-sims <- mclapply(X=1:r, 
-                 function(X){sim(N=N,p=p,K=K,sd_X=sd_X,sd_Y=sd_Y,
-                                 t0=t0,eps=eps,al=al,N_post=N_post,M=M)},
-                 mc.cores = 1
-)
-end <- Sys.time()
-
-
-## check bad sims
-good_sets <- c()
-tick=1
-for(i in 1:r){
-  check <- c()
-  for(j in 1:5){
-    check[j] <- is.data.frame(sims[[i]]$exp[[j]])
-  }
-  if(sum(check)==5){
-    good_sets[tick]=i
-    tick=tick+1
-  }else{
-    ## no nothing
-  }
-}
-
-## collect experiment information into one dataframe
-exps <- data.frame()
-post <- data.frame()
-tick <- 1
-for(i in good_sets){
-  
-  ## collect experiment information
-  ## pronzato
-  exp_pronzato <- sims[[i]]$exp$pronzato
-  exp_pronzato$R <- NA
-  exp_pronzato$method <- "pronzato"
-  exp_pronzato$rep <- tick
-  
-  post_pronzato <- sims[[i]]$post$pronzato
-  post_pronzato$method <- "pronzato"
-  post_pronzato$rep <- tick
-  
-  ## e_greedy
-  exp_e_greedy <- sims[[i]]$exp$e_greedy
-  exp_e_greedy$R <- NA
-  exp_e_greedy$method <- "e_greedy"
-  exp_e_greedy$rep <- tick
-  
-  post_e_greedy <- sims[[i]]$post$e_greedy
-  post_e_greedy$method <- "e_greedy"
-  post_e_greedy$rep <- tick
-  
-  ## greedy
-  exp_greedy <- sims[[i]]$exp$greedy
-  exp_greedy$R <- NA
-  exp_greedy$method <- "greedy"
-  exp_greedy$rep <- tick
-  
-  post_greedy <- sims[[i]]$post$greedy
-  post_greedy$method <- "greedy"
-  post_greedy$rep <- tick
-  
-  ## greedy first
-  exp_greedy_first <- sims[[i]]$exp$greedy_first
-  exp_greedy_first$method <- "greedy_first"
-  exp_greedy_first$rep <- tick
-  
-  post_greedy_first <- sims[[i]]$post$greedy_first
-  post_greedy_first$method <- "greedy_first"
-  post_greedy_first$rep <- tick
-  
-  ## IDS_freq
-  exp_IDS_freq <- sims[[i]]$exp$IDS_freq
-  exp_IDS_freq$R <- NA
-  exp_IDS_freq$method <- "IDS_freq"
-  exp_IDS_freq$rep <- tick
-  
-  post_IDS_freq <- sims[[i]]$post$IDS_freq
-  post_IDS_freq$method <- "IDS_freq"
-  post_IDS_freq$rep <- tick
-  
-  ## create out of trial information
-  ## attach these datasets to the bigger one
-  exps <- rbind(exps,exp_pronzato,exp_greedy,exp_e_greedy,
-                exp_greedy_first,exp_IDS_freq)
-  
-  post <- rbind(post,post_pronzato,post_greedy,post_e_greedy,
-                post_greedy_first,post_IDS_freq)
-  
-  
-  ## update the tick
-  tick=tick+1
-  
-  
-}
-
-burn_in=(p+1)*K*3
-
-exps %>% 
-  filter(sub>burn_in) %>%
-  group_by(method) %>%
-  summarise(mean(regret))
-
-exps %>% 
-  filter(sub>t0 & method=="greedy_first") %>%
-  summarise(mean(R))
-
-convergence <- exps %>% 
-  filter(sub>burn_in) %>%
-  group_by(method,sub) %>%
-  summarise(norm=mean(norm))
-
-ggplot(exps %>% filter(sub==N)) +
-  geom_boxplot(aes(x=method,y=norm))
-
-regret <- exps %>%
-  filter(sub>burn_in) %>%
-  group_by(method,rep) %>%
-  mutate(cum_regret=cumsum(regret)) %>%
-  group_by(method,sub) %>%
-  summarise(cum_regret=mean(cum_regret))
-
-opt <- exps %>%
-      filter(sub>burn_in) %>%
-      mutate(opt=ifelse(regret==0,1,0)) %>%
-      group_by(method,rep) %>%
-      mutate(cum_opt=cumsum(opt),
-             cum_prop=cum_opt/sub) %>%
-      group_by(method,sub) %>%
-      summarise(cum_opt=mean(cum_prop))
-
-ggplot(data=opt) +
-  geom_line(aes(x=sub,y=cum_opt,color=method))
-
-ggplot(data=convergence) +
-  geom_line(aes(x=sub,y=norm,color=method))
-
-ggplot(data=regret) +
-  geom_line(aes(x=sub,y=cum_regret,color=method))
-
-
-post %>% 
-  group_by(method) %>% 
-  summarise(mean(correct))
-
-post %>% 
-  group_by(method) %>% 
-  summarise(mean(regret))
