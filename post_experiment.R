@@ -11,9 +11,6 @@
 setwd("~/Research/Written Prelim/WrittenPrelim")
 source("funcs.R")
 
-library(foreach)
-library(doParallel)
-
 ## post_experiment
 ## Purpose: evaluate post experiment performance
 ## param exp_data: data from experiment
@@ -37,7 +34,8 @@ post_experiment <- function(exp_data,post_data,p,K,theta){
             data=temp)
   
   ## assign intercention to out of experiment subjects
-  perf <- foreach(i=1:nrow(post_data),.combine=rbind) %dopar% {
+  perf <- data.frame()
+  for(i in 1:nrow(post_data)){
     context <- post_data[i,1:p]
     dat <- matrix(NA,ncol=p+3,nrow=K)
     #dat <- as.data.frame(dat)
@@ -62,7 +60,7 @@ post_experiment <- function(exp_data,post_data,p,K,theta){
     print(perf_temp)
     
     ## rbind
-    perf_temp
+    perf <- rbind(perf,perf_temp)
   }
   
   perf <- as.data.frame(perf)

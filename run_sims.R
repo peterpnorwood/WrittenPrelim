@@ -22,10 +22,10 @@ t0=(p+1)*K*3+100
 eps=0.025
 al=0.01
 N_post=500
-M=100
+M=1000
 
 ## how many simulations to run
-r <- 5
+r <- 100
 ## Simulate the experiments
 start <- Sys.time()
 sims <- mclapply(X=1:r, 
