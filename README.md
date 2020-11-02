@@ -11,7 +11,7 @@ Code for simulation study in written preliminary exam.  Below is a list of the d
 
 * analyze_sims.R: Script to produce tables and figures of the simulation results.
 
-### Experiment Simulations
+### Individual Methods
 
 * e_greedy.R: Simulate an experiment with e-greedy sampling.
 
@@ -24,5 +24,3 @@ Code for simulation study in written preliminary exam.  Below is a list of the d
 * greedy_first.R: Simulate an experiment using the greedy first algorithm.
 
 * pronzato: Simulate an experiment by choosing the action which maximizes the reward plus some information gain penalty.
-
-## Simulation Scripts
