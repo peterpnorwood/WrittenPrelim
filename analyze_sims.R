@@ -29,7 +29,6 @@ exps <- exps %>%
                burn_in=3*(p+1)*K) %>%
         filter(rep<=5000)
 
-
 ## analyze cumulative regret 
 regret <- exps %>% filter(sub>burn_in) %>%
   group_by(scenario,method,rep) %>%
@@ -37,33 +36,9 @@ regret <- exps %>% filter(sub>burn_in) %>%
   group_by(scenario,method,sub) %>%
   summarise(mean_regret=mean(cum_regret),
             median_regret=median(cum_regret),
-            se_regret=sd(cum_regret)/5000)
+            se_regret=sd(cum_regret)/sqrt(5000))
 
-View(regret %>% filter(sub==1000)%>%
-select(scenario,method,mean_regret,median_regret,se_regret))
-
-ggplot(data=regret) +
-  geom_line(aes(x=sub,y=mean_regret,color=method)) +
-  facet_wrap(vars(scenario),scales="free") 
-
-
-## analyze proportion of correctimal intervention
-correct <- exps %>% filter(sub>burn_in) %>%
-  group_by(scenario,method,rep) %>%
-  mutate(correct=ifelse(regret==0,1,0),
-         cum_correct=cumsum(correct),
-         prop_correct=cum_correct/sub) %>%
-  group_by(scenario,method,sub) %>%
-  summarise(mean_correct=mean(prop_correct),
-            median_correct=median(prop_correct),
-            se_correct=sd(prop_correct)/5000)
-
-View(correct %>% filter(sub==1000)%>%
-  select(scenario,method,mean_correct,median_correct,se_correct))
-
-ggplot(data=correct) +
-  geom_line(aes(x=sub,y=mean_correct,color=method)) +
-  facet_wrap(vars(scenario),scales="free") 
+save(regret,file="regret.RData")
 
 ## analyze convergence
 theta <- exps %>% filter(sub>burn_in) %>%
@@ -71,16 +46,19 @@ theta <- exps %>% filter(sub>burn_in) %>%
   mutate(rel_efficiency=simple_norm/norm) %>%
   summarise(mean_norm=mean(norm),
             median_norm=median(norm),
-            se_norm=sd(norm)/5000,
+            se_norm=sd(norm)/sqrt(5000),
             mean_simple_norm=mean(simple_norm)) %>%
   mutate(rel_eff=mean_simple_norm/mean_norm)
 
-View(theta %>% filter(sub==1000)%>%
-  select(scenario,method,mean_norm,median_norm,se_norm,rel_eff))
+save(theta,file="theta.RData")
 
-ggplot(data=theta) +
-  geom_line(aes(x=sub,y=mean_norm,color=method)) +
-  facet_wrap(vars(scenario),scales="free") 
+
+# View(theta %>% filter(sub==1000)%>%
+#   select(scenario,method,mean_norm,median_norm,se_norm,rel_eff))
+# 
+# ggplot(data=theta) +
+#   geom_line(aes(x=sub,y=mean_norm,color=method)) +
+#   facet_wrap(vars(scenario),scales="free") 
 
 ## ----------------------------------------------------------------- ##
 ## ----------------------------------------------------------------- ##
@@ -110,7 +88,10 @@ correct_post <- post %>%
       group_by(scenario,method) %>%
       summarise(mean_correct=mean(prop_correct),
                 median_correct=median(prop_correct),
-                se_correct=sd(prop_correct)/5000)
+                se_correct=sd(prop_correct)/sqrt(5000))
+View(correct_post)
+
+save(correct_post,file="correct_post.RData")
 
 regret_post <- post %>% 
   group_by(method,scenario,rep) %>%
@@ -118,5 +99,23 @@ regret_post <- post %>%
   group_by(scenario,method) %>%
   summarise(mean_cum_regret=mean(regret),
             median_cum_regret=median(regret),
-            sd_cum_regret=sd(regret)/5000)
+            se_cum_regret=sd(regret)/sqrt(5000))
+
 View(regret_post)
+
+save(regret_post,file="correct_post.RData")
+
+
+## ----------------------------------------------------------------- ##
+## ----------------------------------------------------------------- ##
+
+## calcualte ratios
+regret <- regret %>% filter(sub==1000)
+correct2 <- correct_post %>% filter(method!="simple")
+norm2 <- theta %>% filter(sub==1000)
+regret_ratio <- cbind(regret,correct2,norm2)
+regret_ratio <- regret_ratio %>%
+  mutate(ratio1=mean_regret/mean_correct,
+         ratio2=mean_regret/rel_eff) %>%
+  select(scenario,method,ratio1,ratio2)
+View(regret_ratio)

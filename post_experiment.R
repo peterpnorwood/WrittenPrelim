@@ -57,7 +57,7 @@ post_experiment <- function(exp_data,post_data,p,K,theta){
     perf_temp[2] <- ifelse(which.max(dat$mu_hat)==which.max(dat$mu),1,0)
     ## regret
     perf_temp[3] <- max(dat$mu) - dat$mu[which.max(dat$mu_hat)]
-    print(perf_temp)
+    #print(perf_temp)
     
     ## rbind
     perf <- rbind(perf,perf_temp)
