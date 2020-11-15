@@ -1,6 +1,10 @@
 # WrittenPrelim
 Code for simulation study in written preliminary exam.  Below is a list of the different R scripts and a breif description of what they do.
 
+### Report and Simulation Study
+* norwood_prelim.pdf: Literature review for exam.
+* norwood_simulation.pdf: Written report of simulation study. 
+
 ### R Notebook
 * notebook.nb: HTML notebook with all code.
 * notebook.Rmd: R Markdown file creating the notebook.
