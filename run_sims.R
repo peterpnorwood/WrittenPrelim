@@ -10,7 +10,6 @@ source("sims.R")
 library(parallel)
 
 ## run the simulations
-
 ## parameters
 p=2
 K=2
@@ -25,7 +24,7 @@ N_post=500
 M=1000
 
 ## how many simulations to run
-r <- 100
+r <- 5250
 ## Simulate the experiments
 start <- Sys.time()
 sims <- mclapply(X=1:r, 

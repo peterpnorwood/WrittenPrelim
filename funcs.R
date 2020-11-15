@@ -6,8 +6,13 @@
 
 library(MASS)
 
-
 ## make_design
+## Purpose: reformat design matrix to align with lm
+## param K: number of arms
+## param p: dim(X)
+## param a: treatment
+## param X: context 
+## return design: vector alining with lm
 make_design <- function(K,p,a,X){
   
   ## create design

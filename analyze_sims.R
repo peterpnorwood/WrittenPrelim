@@ -52,14 +52,6 @@ theta <- exps %>% filter(sub>burn_in) %>%
 
 save(theta,file="theta.RData")
 
-
-# View(theta %>% filter(sub==1000)%>%
-#   select(scenario,method,mean_norm,median_norm,se_norm,rel_eff))
-# 
-# ggplot(data=theta) +
-#   geom_line(aes(x=sub,y=mean_norm,color=method)) +
-#   facet_wrap(vars(scenario),scales="free") 
-
 ## ----------------------------------------------------------------- ##
 ## ----------------------------------------------------------------- ##
 

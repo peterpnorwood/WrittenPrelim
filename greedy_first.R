@@ -159,9 +159,7 @@ greedy_first <- function(train_set,burn_in,A,theta,sd_Y,t0,eps){
         dat[i,p+6] <- R
       }
       
-      
     }  
-    
 
   }
   

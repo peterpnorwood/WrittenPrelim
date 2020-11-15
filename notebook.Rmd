@@ -1,0 +1,1358 @@
+---
+title: "Simulation Study Code"
+output: html_notebook
+---
+
+## Outline
+
+The outline for this the following.
+
+1. General Functions
+2. Individual Methods
+3. Simulation Scripts
+4. Analysis Scripts
+
+#### General Functions
+
+```{r funcs}
+## make_design
+## Purpose: reformat design matrix to align with lm
+## param K: number of arms
+## param p: dim(X)
+## param a: treatment
+## param X: context 
+## return design: vector alining with lm
+make_design <- function(K,p,a,X){
+  
+  ## create design
+  design <- c()
+  for(j in 1:K){
+    if(a==j){
+      x <- c(1,X)
+    }else{
+      x <- rep(0,p+1)
+    }
+    design <- c(design,x)
+  }
+  
+  return(design)
+  
+}
+
+## mean_outcome1
+## Purpose: generate mean outcome
+## param X: p-dimensional context
+## param a: intervention
+## param A: possible interventions
+## param theta: mean parameter vector
+## return mu: mean response
+mean_outcome1 <- function(X,a,A,theta){
+  
+  ## dimensions
+  K <- length(A)
+  p <- length(X)
+  
+  design <- make_design(K=K,p=p,a=a,X=X)
+  
+  mu <- design %*% theta
+  
+  ## return the mean outcome
+  return(mu)
+  
+}
+
+## "vectorize" mean outcome for X and A
+mean_outcome <- function(X,a,A,theta){
+  N <- max(1,nrow(X))
+  
+  if(N==1){
+    mu <- mean_outcome1(X=X,a=a,A=A,theta=theta)
+  } else{
+    mu <- c()
+    ## loop through rows of x
+    for(n in 1:N){
+      mu[n] <- mean_outcome1(X=X[n,],a=a[n],A=A,theta=theta)
+    }
+  }
+  return(mu)
+}
+
+## gen_data
+## Purpose: generate datasets
+## param N: sample size
+## param p: dimension of the context
+## param A: vector of possible interventions
+## param theta: mean parameter vector
+## param sd_X: standard deviation of random error
+## return dat: dataset with columns: X, A, mu, Y
+gen_data <- function(N,p,sd_X,A,sd_Y,theta){
+  
+  ## generate context
+  X <- 0.5*mvrnorm(N,rep(0,p),sd_X*diag(p))
+  ## truncate
+  for(i in 1:N){
+    for(j in 1:p){
+      if(X[i,j] < 1 & X[i,j] > -1){
+        ## do nothin
+      }else if(X[i,j] <= -1){
+        X[i,j]=-1
+      }else if(X[i,j] >= 1){
+        X[i,j]=1
+      }
+    }
+  }
+
+  ## create randomly assigned A
+  A_vec <- sample(A,N,replace=TRUE)
+  
+  ## mean outcome
+  mu <- mean_outcome(X=X,a=A_vec,A=A,theta=theta)
+  ## true outcome
+  Y <- rnorm(N,mu,sd_Y)
+  
+  ## dataset to return
+  dat <- data.frame(X,A=A_vec,mu,Y)
+  
+  return(dat)
+  
+}
+
+```
+
+#### General Methods
+
+##### E-Greedy
+```{r e_greedy}
+## e_greedy
+## Purpose: run a e_greedy experiment
+## param train_set: dataset with context for N individuals
+## param burn_in: sample size of simple randomization
+## param A: vector of possible treatments
+## param theta: true mean outcome parameter vector
+## param sd_Y: standard deviation for response
+## return dat: dataframe with X,A,mu,Y,regret,norm
+e_greedy <- function(train_set,burn_in,A,theta,sd_Y,eps){
+  
+  ## number of subjects
+  N <- nrow(train_set)
+  ## dimension of context
+  p <- ncol(train_set)-3
+  ## number of arms
+  K <- length(A)
+  
+  ## trial dataset
+  dat <- matrix(NA,nrow=N,ncol=p+5)
+  ## context
+  dat[1:N,1:p] <- as.matrix(train_set)[1:N,1:p]
+  ## first burn_in interventions
+  dat[1:burn_in,p+1] <- train_set$A[1:burn_in]
+  ## first burn_in means
+  dat[1:burn_in,p+2] <- train_set$mu[1:burn_in]
+  ## first burn_in outcomes
+  dat[1:burn_in,p+3] <- train_set$Y[1:burn_in]
+  ## name the same colnames
+  colnames(dat) <- c(colnames(train_set),"regret","norm")
+  
+  ## loop through the new patients
+  for(i in (burn_in+1):N){
+    
+    ## fit the outcome model
+    X_temp <- dat[1:(i-1),1:p]
+    A_temp <- dat[1:(i-1),p+1]
+    Y <- dat[1:(i-1),p+3]
+    
+    temp <- data.frame(X_temp,A=A_temp,Y)
+    
+    fit <- lm(Y~-1+as.factor(A)+as.factor(A):.-
+                as.factor(A):A,
+              data=temp)
+    
+    ## gather parameter convergence information
+    coef_fit <- coef(fit)
+    theta_hat <- c()
+    ## put them in the same format as the theta vector
+    tik <- 1
+    for(ii in 1:K){
+      for(jj in 0:p){
+        theta_hat[tik] <- coef_fit[ii+(K)*jj]
+        tik=tik+1
+      }
+    }
+    
+    ## measure the euclidean norm between theta and theta_hat
+    dat[i,ncol(dat)] <- norm(matrix(theta-theta_hat),type="F")
+    
+    ## loop through interventions to find greedy intevention
+    info <- matrix(NA,nrow=length(A),ncol=3)
+    tick=1
+    for(a in A){
+      ## gather det if a is assigned
+      temp <- data.frame(t(dat[i,1:p]),A=a,mu=0,Y=0,regret=0,norm=0)
+      ## estiamted mean outcome given a
+      mu_hat <- predict(fit,temp)
+      ## true mean outcome given a
+      mu <- mean_outcome(X=dat[i,1:p],A=A,a=a,theta=theta)
+      ## save info
+      info[tick,] <- c(a,mu_hat,mu)
+      tick=tick+1
+    }
+    ## save info as dataframe
+    info <- data.frame(info)
+    colnames(info) <- c("A","mu_hat","mu")
+    
+    ## randomize via e-greedy
+    prob_vec <- rep(eps/(length(A)-1),length(A))
+    prob_vec[which.max(info$mu_hat)] <- 1-eps
+    
+    ## assign intervention (e-greedy)
+    dat[i,p+1] <- sample(A,1,prob=prob_vec)
+    ## find mean outcome
+    dat[i,p+2] <- info$mu[dat[i,p+1]]
+    ## find outcome
+    dat[i,p+3] <- rnorm(1,dat[i,p+2],sd_Y)
+    ## find regret
+    dat[i,p+4] <- max(info$mu) - dat[i,p+2]
+    
+  }
+  
+  dat <- data.frame(dat)
+  dat$sub <- 1:nrow(dat)
+  return(dat)
+  
+}
+
+```
+
+##### IDS_bayes (IDS-B)
+```{r ids_bayes}
+## calc_ir
+## Purpose: calculate information ratio
+## param M: samples to take from posterior distribution
+## param mu: posterior mean
+## param Sigma: posterior covariance matrix
+## param A: posterior of interventions
+## param context: context for subject
+## return ir: column of information ratios for each individual
+calc_ir <- function(M,mu,Sigma,A,context){
+  
+  ## sample from posterior
+  posterior_sample <- mvrnorm(n=M,mu=mu,Sigma=Sigma)
+  
+  ## rearrange posterior samples to match our parameterization
+  theta_sample <- matrix(NA,nrow=nrow(posterior_sample),
+                      ncol=ncol(posterior_sample))
+  for(m in 1:M){    
+    ## put them in the same format as the theta vector
+    coef_fit <- posterior_sample[m,]
+    theta_hat <- c()
+    tik <- 1
+    for(ii in 1:K){
+      for(jj in 0:p){
+        theta_hat[tik] <- coef_fit[ii+(K)*jj]
+        tik=tik+1
+      }
+    }
+    ## update matrix
+    theta_sample[m,] <- theta_hat
+    
+  }
+  
+  ## create mu_hat
+  mu_hat <- (1/M)*colSums(theta_sample)
+  
+  ## see how often each piece is maximized
+  maxs <- c()
+  
+  for(m in 1:M){
+    ## get estimated value for each a
+    ests <- c()
+    for(a in A){
+      ## rearrange context
+      ctx <- make_design(K=K,p=p,a=a,X=context)
+      ## estimated mean response
+      ests[a] <- ctx %*% theta_sample[m,]
+    }
+    ## save max
+    maxs[m] <- which.max(ests)
+  }
+  max_df <- data.frame(max=maxs,m=1:M)
+  
+  ## if there is no separation, then pick the opt txt
+  if(length(unique(max_df$max))==1){
+    ir <- c()
+    for(a in A){
+      if(a==unique(max_df$max)){
+        ir[a] <- 1
+      }else{
+        ir[a] <- 2
+      }
+    }
+    
+  }else{
+  
+  ## create p_star, mu_starm, L, rho_star
+  p_star <- c()
+  mu_a <- list()
+  L <- matrix(0,nrow=length(mu),ncol=length(mu))
+  rho_star <- 0
+  for(a in A){
+    p_star[a] <- length(maxs[maxs==a])/M
+    ## create mu_a and L
+    if(p_star[a]==0){
+      mu_a[[a]] <- 0
+    }else if(p_star[a]==1/M){
+      ## subset the ms
+      ms <- max_df$m[max_df$max==a]
+      mu_a[[a]] <- theta_sample[ms,]
+      ## create L
+      L <- L + p_star[a]*( (mu_a[[a]]-mu_hat) %*% t((mu_a[[a]]-mu_hat)))
+      ## create rho_star
+      ctx <- make_design(K=K,p=p,a=a,X=context)
+      rho_star <- rho_star + p_star[a]*(ctx %*% mu_a[[a]])
+    }else{
+      ## subset the ms
+      ms <- max_df$m[max_df$max==a]
+      mu_a[[a]] <- colSums(theta_sample[ms,])/length(ms)
+      ## create L
+      L <- L + p_star[a]*( (mu_a[[a]]-mu_hat) %*% t((mu_a[[a]]-mu_hat)))
+      ## create rho_star
+      ctx <- make_design(K=K,p=p,a=a,X=context)
+      rho_star <- rho_star + p_star[a]*(ctx %*% mu_a[[a]])
+    }
+
+  }
+  
+  ## ceate v_a, delta_a, and information ratio
+  v_a <- c()
+  delta_a <- c()
+  ir <- c()
+  for(a in A){
+    ctx <- make_design(K=K,p=p,a=a,X=context)
+    v_a[a] <- t(ctx) %*% (L %*% ctx) 
+    delta_a[a] <- rho_star - ctx %*% mu_hat
+    ir[a] <- (delta_a[a]**2)/v_a[a]
+  }
+  }
+  
+  return(ir)
+  
+}
+
+## IDS_bayes
+## Purpose: run an experiment with IDS (frequentist analog)
+## param train_set: dataset with context for N individuals
+## param burn_in: sample size of simple randomization
+## param A: vector of possible treatments
+## param theta: true mean outcome parameter vector
+## param sd_Y: standard deviation for response
+## param M: samples to take from posterior distribution
+## return dat: dataframe with X,A,mu,Y,regret,norm
+IDS_bayes <- function(train_set,burn_in,A,theta,sd_Y,M){
+  
+  ## number of subjects
+  N <- nrow(train_set)
+  ## dimension of context
+  p <- ncol(train_set)-3
+  ## number of arms
+  K <- length(A)
+  
+  ## trial dataset
+  dat <- matrix(NA,nrow=N,ncol=p+5)
+  ## context
+  dat[1:N,1:p] <- as.matrix(train_set)[1:N,1:p]
+  ## first burn_in interventions
+  dat[1:burn_in,p+1] <- train_set$A[1:burn_in]
+  ## first burn_in means
+  dat[1:burn_in,p+2] <- train_set$mu[1:burn_in]
+  ## first burn_in outcomes
+  dat[1:burn_in,p+3] <- train_set$Y[1:burn_in]
+  ## name the same colnames
+  colnames(dat) <- c(colnames(train_set),"regret","norm")
+  
+  ## loop through the new patients
+  for(i in (burn_in+1):N){
+    
+    ## fit the outcome model
+    X_temp <- dat[1:(i-1),1:p]
+    A_temp <- dat[1:(i-1),p+1]
+    Y <- dat[1:(i-1),p+3]
+    
+    temp <- data.frame(X_temp,A=A_temp,Y)
+    
+    ## fit linear model with default priors
+    fit <- lm(Y~-1+as.factor(A)+as.factor(A):.-
+                          as.factor(A):A,
+                          data=temp)
+    
+    ## gather parameter convergence information
+    coef_fit <- coef(fit)
+    theta_hat <- c()
+    ## put them in the same format as the theta vector
+    tik <- 1
+    for(ii in 1:K){
+      for(jj in 0:p){
+        theta_hat[tik] <- coef_fit[ii+(K)*jj]
+        tik=tik+1
+      }
+    }
+    
+    ## measure the euclidean norm between theta and theta_hat
+    dat[i,ncol(dat)] <- norm(matrix(theta-theta_hat),type="F")
+    
+    ## loop through interventions to find greedy intevention
+    info <- matrix(NA,nrow=length(A),ncol=4)
+    
+    ## calcualte information ratio
+    ir <- calc_ir(M=M,mu=coef_fit,Sigma=vcov(fit),A=1:K,context=dat[i,1:p])
+    ## calculate true mean outcomes
+    mean_outcomes <- c()
+    for(a in A){
+      mean_outcomes[a] <- mean_outcome(X=dat[i,1:p],A=A,a=a,theta=theta)
+    }
+    ## save info as dataframe
+    info <- data.frame(A=1:K,ir=ir,mu=mean_outcomes)
+    
+    ## assign intervention
+    dat[i,p+1] <- info$A[which.min(info$ir)]
+    ## find mean outcome
+    dat[i,p+2] <- info$mu[which.min(info$ir)]
+    ## find outcome
+    dat[i,p+3] <- rnorm(1,dat[i,p+2],sd_Y)
+    ## find regret
+    dat[i,p+4] <- max(info$mu) - dat[i,p+2]
+  }
+  
+  dat <- data.frame(dat)
+  dat$sub <- 1:nrow(dat)
+  return(dat)
+  
+}
+```
+
+
+##### IDS_freq (IDS-D)
+```{r ids_freq}
+## IDS_freq
+## Purpose: run an experiment with IDS (frequentist analog)
+## param train_set: dataset with context for N individuals
+## param burn_in: sample size of simple randomization
+## param A: vector of possible treatments
+## param theta: true mean outcome parameter vector
+## param sd_Y: standard deviation for response
+## return dat: dataframe with X,A,mu,Y,regret,norm
+IDS_freq <- function(train_set,burn_in,A,theta,sd_Y){
+  
+  ## number of subjects
+  N <- nrow(train_set)
+  ## dimension of context
+  p <- ncol(train_set)-3
+  ## number of arms
+  K <- length(A)
+  
+  ## trial dataset
+  dat <- matrix(NA,nrow=N,ncol=p+5)
+  ## context
+  dat[1:N,1:p] <- as.matrix(train_set)[1:N,1:p]
+  ## first burn_in interventions
+  dat[1:burn_in,p+1] <- train_set$A[1:burn_in]
+  ## first burn_in means
+  dat[1:burn_in,p+2] <- train_set$mu[1:burn_in]
+  ## first burn_in outcomes
+  dat[1:burn_in,p+3] <- train_set$Y[1:burn_in]
+  ## name the same colnames
+  colnames(dat) <- c(colnames(train_set),"regret","norm")
+  
+  ## loop through the new patients
+  for(i in (burn_in+1):N){
+    
+    ## fit the outcome model
+    X_temp <- dat[1:(i-1),1:p]
+    A_temp <- dat[1:(i-1),p+1]
+    Y <- dat[1:(i-1),p+3]
+    
+    temp <- data.frame(X_temp,A=A_temp,Y)
+    
+    fit <- lm(Y~-1+as.factor(A)+as.factor(A):.-
+                as.factor(A):A,
+              data=temp)
+    
+    ## gather parameter convergence information
+    coef_fit <- coef(fit)
+    theta_hat <- c()
+    ## put them in the same format as the theta vector
+    tik <- 1
+    for(ii in 1:K){
+      for(jj in 0:p){
+        theta_hat[tik] <- coef_fit[ii+(K)*jj]
+        tik=tik+1
+      }
+    }
+    
+    ## measure the euclidean norm between theta and theta_hat
+    dat[i,ncol(dat)] <- norm(matrix(theta-theta_hat),type="F")
+  
+    ## loop through interventions to find greedy intevention
+    info <- matrix(NA,nrow=length(A),ncol=4)
+    
+    ## determinant before addition
+    prev_X <- model.matrix(fit)
+    det_prev_XtX <- det(t(prev_X) %*% prev_X)
+    
+    tick=1
+    for(a in A){
+      ## gather det if a is assigned
+      temp2 <- data.frame(t(dat[i,1:p]),A=a,Y=0)
+      temp_X <- model.matrix(fit,data=rbind(temp,temp2))
+      det_XtX <- det(t(temp_X) %*% temp_X)
+      info_gain <- det_XtX/det_prev_XtX
+      ## reward + (alpha/t)*d_k
+      mu_hat <- predict(fit,temp2)
+      ## true mean outcome given a
+      mu <- mean_outcome(X=dat[i,1:p],A=A,a=a,theta=theta)
+      ## save info
+      info[tick,] <- c(a,mu_hat,info_gain,mu)
+      tick=tick+1
+    }
+    ## save info as dataframe
+    info <- data.frame(info)
+    colnames(info) <- c("A","mu_hat","info_gain","mu")
+    info$cost <- (max(info$mu_hat)+1)-info$mu_hat
+    info$ir <- info$cost/info$info_gain
+    
+    ## assign intervention
+    dat[i,p+1] <- info$A[which.min(info$ir)]
+    ## find mean outcome
+    dat[i,p+2] <- info$mu[which.min(info$ir)]
+    ## find outcome
+    dat[i,p+3] <- rnorm(1,dat[i,p+2],sd_Y)
+    ## find regret
+    dat[i,p+4] <- max(info$mu) - dat[i,p+2]
+  }
+  
+  dat <- data.frame(dat)
+  dat$sub <- 1:nrow(dat)
+  return(dat)
+  
+}
+```
+
+##### Greedy
+```{r greedy}
+## greedy
+## Purpose: run a greedy experiment
+## param train_set: dataset with context for N individuals
+## param burn_in: sample size of simple randomization
+## param A: vector of possible treatments
+## param theta: true mean outcome parameter vector
+## param sigma: standard deviation for response
+## return dat: dataframe with X,A,mu,Y,regret,norm
+greedy <- function(train_set,burn_in,A,theta,sd_Y){
+  
+  ## number of subjects
+  N <- nrow(train_set)
+  ## dimension of context
+  p <- ncol(train_set)-3
+  ## number of arms
+  K <- length(A)
+  
+  ## trial dataset
+  dat <- matrix(NA,nrow=N,ncol=p+5)
+  ## context
+  dat[1:N,1:p] <- as.matrix(train_set)[1:N,1:p]
+  ## first burn_in interventions
+  dat[1:burn_in,p+1] <- train_set$A[1:burn_in]
+  ## first burn_in means
+  dat[1:burn_in,p+2] <- train_set$mu[1:burn_in]
+  ## first burn_in outcomes
+  dat[1:burn_in,p+3] <- train_set$Y[1:burn_in]
+  ## name the same colnames
+  colnames(dat) <- c(colnames(train_set),"regret","norm")
+  
+  ## loop through the new patients
+  for(i in (burn_in+1):N){
+    
+    ## fit the outcome model
+    X_temp <- dat[1:(i-1),1:p]
+    A_temp <- dat[1:(i-1),p+1]
+    Y <- dat[1:(i-1),p+3]
+    
+    temp <- data.frame(X_temp,A=A_temp,Y)
+    
+    fit <- lm(Y~-1+as.factor(A)+as.factor(A):.-
+              as.factor(A):A,
+              data=temp)
+    
+    ## gather parameter convergence information
+    coef_fit <- coef(fit)
+    theta_hat <- c()
+    ## put them in the same format as the theta vector
+    tik <- 1
+    for(ii in 1:K){
+      for(jj in 0:p){
+        theta_hat[tik] <- coef_fit[ii+(K)*jj]
+        tik=tik+1
+      }
+    }
+    
+    ## measure the euclidean norm between theta and theta_hat
+    dat[i,ncol(dat)] <- norm(matrix(theta-theta_hat),type="F")
+    
+    ## loop through interventions to find greedy intevention
+    info <- matrix(NA,nrow=length(A),ncol=3)
+    tick=1
+    for(a in A){
+      ## gather det if a is assigned
+      temp <- data.frame(t(dat[i,1:p]),A=a,mu=0,Y=0,regret=0,norm=0)
+      ## estiamted mean outcome given a
+      mu_hat <- predict(fit,temp)
+      ## true mean outcome given a
+      mu <- mean_outcome(X=dat[i,1:p],A=A,a=a,theta=theta)
+      ## save info
+      info[tick,] <- c(a,mu_hat,mu)
+      tick=tick+1
+    }
+    ## save info as dataframe
+    info <- data.frame(info)
+    colnames(info) <- c("A","mu_hat","mu")
+    
+    ## assign intervention
+    dat[i,p+1] <- info$A[which.max(info$mu_hat)]
+    ## find mean outcome
+    dat[i,p+2] <- info$mu[which.max(info$mu_hat)]
+    ## find outcome
+    dat[i,p+3] <- rnorm(1,dat[i,p+2],sd_Y)
+    ## find regret
+    dat[i,p+4] <- max(info$mu) - dat[i,p+2]
+  }
+  
+  dat <- data.frame(dat)
+  dat$sub <- 1:nrow(dat)
+  return(dat)
+  
+}
+```
+
+##### Greedy First
+```{r greedy_first}
+## greedy_first
+## Purpose: run an experiment with the GF algoirthm
+## param train_set: dataset with context for N individuals
+## param burn_in: sample size of simple randomization
+## param A: vector of possible treatments
+## param theta: true mean outcome parameter vector
+## param sd_Y: standard deviation for response
+## param t0: number of obsrvations (after burn in)
+##           before we start checking to move from greedy
+## param eps: P(explore) if we switch to eps greedy
+## return dat: dataframe with X,A,mu,Y,regret,norm,R
+greedy_first <- function(train_set,burn_in,A,theta,sd_Y,t0,eps){
+  
+  
+  ## number of subjects
+  N <- nrow(train_set)
+  ## dimension of context
+  p <- ncol(train_set)-3
+  ## number of arms
+  K <- length(A)
+  
+  ## trial dataset
+  dat <- matrix(NA,nrow=N,ncol=p+6)
+  ## context
+  dat[1:N,1:p] <- as.matrix(train_set)[1:N,1:p]
+  ## first burn_in interventions
+  dat[1:burn_in,p+1] <- train_set$A[1:burn_in]
+  ## first burn_in means
+  dat[1:burn_in,p+2] <- train_set$mu[1:burn_in]
+  ## first burn_in outcomes
+  dat[1:burn_in,p+3] <- train_set$Y[1:burn_in]
+  ## name the same colnames
+  colnames(dat) <- c(colnames(train_set),"regret","norm","R")
+  
+  ## parameter to see if we stick with greedy or move to e-greedy
+  R=0
+  ## loop through the new patients
+  for(i in (burn_in+1):N){
+    ## fit the outcome model
+    X_temp <- dat[1:(i-1),1:p]
+    A_temp <- dat[1:(i-1),p+1]
+    Y <- dat[1:(i-1),p+3]
+    
+    temp <- data.frame(X_temp,A=A_temp,Y)
+    
+    fit <- lm(Y~-1+as.factor(A)+as.factor(A):.-
+                as.factor(A):A,
+              data=temp)
+    
+    ## gather parameter convergence information
+    coef_fit <- coef(fit)
+    theta_hat <- c()
+    ## put them in the same format as the theta vector
+    tik <- 1
+    for(ii in 1:K){
+      for(jj in 0:p){
+        theta_hat[tik] <- coef_fit[ii+(K)*jj]
+        tik=tik+1
+      }
+    }
+    
+    ## measure the euclidean norm between theta and theta_hat
+    dat[i,ncol(dat)-1] <- norm(matrix(theta-theta_hat),type="F")
+    
+    
+    ## loop through interventions to find greedy intevention
+    info <- matrix(NA,nrow=length(A),ncol=3)
+    tick=1
+    for(a in A){
+      ## gather det if a is assigned
+      temp <- data.frame(t(dat[i,1:p]),A=a,mu=0,Y=0,regret=0,norm=0)
+      ## estiamted mean outcome given a
+      mu_hat <- predict(fit,temp)
+      ## true mean outcome given a
+      mu <- mean_outcome(X=dat[i,1:p],A=A,a=a,theta=theta)
+      ## save info
+      info[tick,] <- c(a,mu_hat,mu)
+      tick=tick+1
+    }
+    ## save info as dataframe
+    info <- data.frame(info)
+    colnames(info) <- c("A","mu_hat","mu")
+    
+    ## conditional logic to select action
+    if(i < t0){
+      
+      ## assign intervention (greedy)
+      dat[i,p+1] <- info$A[which.max(info$mu_hat)]
+      ## find mean outcome
+      dat[i,p+2] <- info$mu[which.max(info$mu_hat)]
+      ## find outcome
+      dat[i,p+3] <- rnorm(1,dat[i,p+2],sd_Y)
+      ## find regret
+      dat[i,p+4] <- max(info$mu) - dat[i,p+2]
+      
+    }else if(i == t0){
+      
+      ## assign intervention (greedy)
+      dat[i,p+1] <- info$A[which.max(info$mu_hat)]
+      ## find mean outcome
+      dat[i,p+2] <- info$mu[which.max(info$mu_hat)]
+      ## find outcome
+      dat[i,p+3] <- rnorm(1,dat[i,p+2],sd_Y)
+      ## find regret
+      dat[i,p+4] <- max(info$mu) - dat[i,p+2]
+      
+      ## get lambda0
+      X_t0 <- model.matrix(fit)
+      M_t0 <- t(X_t0) %*% X_t0
+      eig_M <- eigen(M_t0)
+      lambda0 <- min(eig_M$values)/(2*t0)
+      
+    } else if(i > t0){
+      
+      ## if there was covariate diversity at the last time step
+      ## then check again
+      ## if there wasn't then no need to check
+      if(R==0){
+        ## assign intervention (greedy)
+        dat[i,p+1] <- info$A[which.max(info$mu_hat)]
+        ## find mean outcome
+        dat[i,p+2] <- info$mu[which.max(info$mu_hat)]
+        ## find outcome
+        dat[i,p+3] <- rnorm(1,dat[i,p+2],sd_Y)
+        ## find regret
+        dat[i,p+4] <- max(info$mu) - dat[i,p+2]
+        dat[i,p+6] <- R
+      
+        ## check to see if we have covariate diversity
+        X_t1 <- model.matrix(fit)
+        M_t1 <- t(X_t0) %*% X_t0
+        eig_M_t1 <- eigen(M_t1)
+        lambda1 <- min(eig_M_t1$values)
+        R <- R+ifelse(lambda1 < lambda0*(i-1)*0.25,1,0)
+      
+      } else{ 
+        ## randomize via e-greedy
+        prob_vec <- rep(eps/(length(A)-1),length(A))
+        prob_vec[which.max(info$mu_hat)] <- 1-eps
+        
+        ## assign intervention (e-greedy)
+        dat[i,p+1] <- sample(A,1,prob=prob_vec)
+        ## find mean outcome
+        dat[i,p+2] <- info$mu[dat[i,p+1]]
+        ## find outcome
+        dat[i,p+3] <- rnorm(1,dat[i,p+2],sd_Y)
+        ## find regret
+        dat[i,p+4] <- max(info$mu) - dat[i,p+2]
+        dat[i,p+6] <- R
+      }
+      
+    }  
+
+  }
+  
+  dat <- data.frame(dat)
+  dat$sub <- 1:nrow(dat)
+  return(dat)
+  
+}
+
+```
+
+##### Pronzato
+```{r pronzato}
+## alpha_t
+## Purpose: generate alpha_t for the pronzato algorithm
+##          that satisfies theorem conditions
+## param alpha: some value > 0
+## param t: time step
+alpha_t <- function(alpha,t){
+  alpha_t <- alpha*sqrt(t)*log(t)
+  return(alpha_t)
+}
+
+## pronzato
+## Purpose: run a experiment following pronzato (2000)'s method
+## param train_set: dataset with context for N individuals
+## param burn_in: sample size of simple randomization
+## param A: vector of possible treatments
+## param theta: true mean outcome parameter vector
+## param sd_Y: standard deviation for response
+## param al: parameter that represents compromise
+## return dat: dataframe with X,A,mu,Y,regret,norm
+pronzato <- function(train_set,burn_in,A,theta,sd_Y,al){
+  
+  ## number of subjects
+  N <- nrow(train_set)
+  ## dimension of context
+  p <- ncol(train_set)-3
+  ## number of arms
+  K <- length(A)
+  
+  ## trial dataset
+  dat <- matrix(NA,nrow=N,ncol=p+5)
+  ## context
+  dat[1:N,1:p] <- as.matrix(train_set)[1:N,1:p]
+  ## first burn_in interventions
+  dat[1:burn_in,p+1] <- train_set$A[1:burn_in]
+  ## first burn_in means
+  dat[1:burn_in,p+2] <- train_set$mu[1:burn_in]
+  ## first burn_in outcomes
+  dat[1:burn_in,p+3] <- train_set$Y[1:burn_in]
+  ## name the same colnames
+  colnames(dat) <- c(colnames(train_set),"regret","norm")
+  
+  ## loop through the new patients
+  for(i in (burn_in+1):N){
+    
+    ## fit the outcome model
+    X_temp <- dat[1:(i-1),1:p]
+    A_temp <- dat[1:(i-1),p+1]
+    Y <- dat[1:(i-1),p+3]
+    
+    temp <- data.frame(X_temp,A=A_temp,Y)
+    
+    fit <- lm(Y~-1+as.factor(A)+as.factor(A):.-
+                as.factor(A):A,
+              data=temp)
+    
+    ## gather parameter convergence information
+    coef_fit <- coef(fit)
+    theta_hat <- c()
+    ## put them in the same format as the theta vector
+    tik <- 1
+    for(ii in 1:K){
+      for(jj in 0:p){
+        theta_hat[tik] <- coef_fit[ii+(K)*jj]
+        tik=tik+1
+      }
+    }
+    
+    ## measure the euclidean norm between theta and theta_hat
+    dat[i,ncol(dat)] <- norm(matrix(theta-theta_hat),type="F")
+    
+    ## get "I-inv" matrix
+    sigma_hat <- sigma(fit)
+    Iinv <- (i-1)*vcov(fit)/I(sigma_hat**2)
+    
+    ## alpha
+    alpha <- alpha_t(al,i)
+    
+    ## loop through interventions to find greedy intevention
+    info <- matrix(NA,nrow=length(A),ncol=3)
+    tick=1
+    for(a in A){
+      
+      ## gather det if a is assigned
+      temp <- data.frame(t(dat[i,1:p]),A=a,mu=0,Y=0,regret=0,norm=0)
+      fx <- model.matrix(fit,data=temp)
+      ## reward + (alpha/t)*d_k
+      mu_hat <- predict(fit,temp)
+      z <- mu_hat + (alpha/(i-1))*( fx %*% (Iinv %*% t(fx)) )
+      ## true mean outcome given a
+      mu <- mean_outcome(X=dat[i,1:p],A=A,a=a,theta=theta)
+      ## save info
+      info[tick,] <- c(a,z,mu)
+      tick=tick+1
+    }
+    ## save info as dataframe
+    info <- data.frame(info)
+    colnames(info) <- c("A","z","mu")
+    
+    ## assign intervention
+    dat[i,p+1] <- info$A[which.max(info$z)]
+    ## find mean outcome
+    dat[i,p+2] <- info$mu[which.max(info$z)]
+    ## find outcome
+    dat[i,p+3] <- rnorm(1,dat[i,p+2],sd_Y)
+    ## find regret
+    dat[i,p+4] <- max(info$mu) - dat[i,p+2]
+  }
+  
+  dat <- data.frame(dat)
+  dat$sub <- 1:nrow(dat)
+  return(dat)
+  
+}
+```
+
+#### Simulation Scripts
+```{r sims,eval=FALSE}
+## post_experiment
+## Purpose: evaluate post experiment performance
+## param exp_data: data from experiment
+## param post_data: post experiment sample
+## param p: dimension of contexts (not including intercept)
+## param K: number of arms
+## param theta: true mean parameter vector
+## return output: list with (1) dataframe with correct and regret
+##                (2) final norm between theta and theta_hat
+post_experiment <- function(exp_data,post_data,p,K,theta){
+  
+  ## fit the model on the experiment data
+  X_temp <- exp_data[1:N_post,1:p]
+  A_temp <- exp_data[1:N_post,p+1]
+  Y <- exp_data[1:N_post,p+3]
+  
+  temp <- data.frame(X_temp,A=A_temp,Y)
+  
+  fit <- lm(Y~-1+as.factor(A)+as.factor(A):.-
+            as.factor(A):A,
+            data=temp)
+  
+  ## assign intercention to out of experiment subjects
+  perf <- data.frame()
+  for(i in 1:nrow(post_data)){
+    context <- post_data[i,1:p]
+    dat <- matrix(NA,ncol=p+3,nrow=K)
+    #dat <- as.data.frame(dat)
+    colnames(dat) <- c(colnames(context),"A","mu_hat","mu")
+    for(k in 1:K){
+      dat[k,1:p] <- as.matrix(context)
+      dat[k,p+1] <- k
+      ## predicted outcome
+      dat[k,p+2] <- predict(fit,newdat=data.frame(t(dat[k,1:p]),A=k,Y=0))
+      ## true outcome               
+      dat[k,p+3] <- mean_outcome(X=dat[k,1:p],A=c(1:K),a=k,theta=theta)
+    }
+    dat <- as.data.frame(dat)
+    ## save data
+    perf_temp <- c()
+    ## subject
+    perf_temp[1] <- i
+    ## did we get it right
+    perf_temp[2] <- ifelse(which.max(dat$mu_hat)==which.max(dat$mu),1,0)
+    ## regret
+    perf_temp[3] <- max(dat$mu) - dat$mu[which.max(dat$mu_hat)]
+    #print(perf_temp)
+    
+    ## rbind
+    perf <- rbind(perf,perf_temp)
+  }
+  
+  perf <- as.data.frame(perf)
+  colnames(perf) <- c("sub","correct","regret")
+  
+  return(perf)
+  
+}
+
+## sim
+## Purpose: simulate all methods on the same dataset
+## param N: total sample size
+## param p: number of features in the context (not including intercept)
+## param K: number of arms
+## param sd_X: standard deviation of the context
+## param sd_Y: scaling factor sd(Y)=(sd_Y)*sqrt(p+1)
+## param t0: time for greedy first to stay with 
+##           greedy before checking
+## param eps: P(explore) = eps in greedy first if it switches
+## param al: value for weight put on penalty in pronzato method
+## param N_post: sample to take out of the experiment
+## param M: samples to take out of posterior distribution for IDS
+## return output: list of trial information from each method
+##                and out of trial information
+sim <- function(N,p,K,sd_X,sd_Y,
+                t0,eps,al,N_post,M){
+  
+  ## standard deviation of Y
+  sd_Y <- sd_Y*sqrt(p)
+  ## burn in period is (# of parameters in full model)*3
+  burn_in <- (p+1)*K*3
+  ## vector of treatments
+  A <- 1:K
+  
+  ## randomly sample the mean parameters
+  theta <- rnorm((p+1)*K,0,1)
+  
+  ## generate training set
+  train_set <- gen_data(N=N,p=p,sd_X=sd_X,A=1:K,sd_Y=sd_Y,theta=theta)
+  
+  ## run pronzato experiment
+  pronzato_sim <- try(pronzato(train_set=train_set,burn_in=burn_in,
+                      A=A,theta=theta,sd_Y=sd_Y,al=al))
+  
+  ## run e_greedy experiment
+  e_greedy_sim <- try(e_greedy(train_set=train_set,burn_in=burn_in,
+                      sd_Y=sd_Y,A=A,theta=theta,eps=eps))
+  
+  
+  ## run greedy experiment
+  greedy_sim <- try(greedy(train_set=train_set,burn_in=burn_in,
+                           sd_Y=sd_Y,A=A,theta=theta))
+  
+  ## run GF experiment
+  greedy_first_sim <- try(greedy_first(train_set=train_set,burn_in=burn_in,
+                           sd_Y=sd_Y,A=A,theta=theta,t0=t0,eps=eps))
+  
+  ## run IDS experiment
+  IDS_freq_sim <- try(IDS_freq(train_set=train_set,burn_in=burn_in,
+                               sd_Y=sd_Y,A=A,theta=theta))
+  
+  ## run IDS experiment
+  IDS_bayes_sim <- try(IDS_bayes(train_set=train_set,burn_in=burn_in,
+                                 sd_Y=sd_Y,A=A,theta=theta,M=M))
+  
+  
+  ## out of experiment information
+  
+  ## out of experiment data
+  post_data <- gen_data(N=N_post,p=p,sd_X=sd_X,A=1:K,sd_Y=sd_Y,theta=theta)
+  
+  post_pronzato <- try(post_experiment(exp_data=pronzato_sim,
+                                       post_data=post_data,
+                                       p=p,K=K,theta=theta))
+  
+  post_e_greedy <- try(post_experiment(exp_data=e_greedy_sim,
+                                       post_data=post_data,
+                                       p=p,K=K,theta=theta))
+  
+  post_greedy <- try(post_experiment(exp_data=greedy_sim,
+                                       post_data=post_data,
+                                p=p,K=K,theta=theta))
+  
+  post_greedy_first <- try(post_experiment(exp_data=greedy_first_sim,
+                                     post_data=post_data,
+                                     p=p,K=K,theta=theta))
+  
+  post_IDS_freq <- try(post_experiment(exp_data=IDS_freq_sim,
+                                     post_data=post_data,
+                                     p=p,K=K,theta=theta))
+  
+  post_IDS_bayes <- try(post_experiment(exp_data=IDS_bayes_sim,
+                                       post_data=post_data,
+                                       p=p,K=K,theta=theta))
+  
+  post_simple <- try(post_experiment(exp_data=train_set,
+                                        post_data=post_data,
+                                        p=p,K=K,theta=theta))
+  
+  
+  
+  ## save output in a list
+  exp_output <- list(train_set=train_set,
+                     pronzato=pronzato_sim,
+                     e_greedy=e_greedy_sim,
+                     greedy=greedy_sim,
+                     greedy_first=greedy_first_sim,
+                     IDS_freq=IDS_freq_sim,
+                     IDS_bayes=IDS_bayes_sim)
+  
+  post_output <- list(pronzato=post_pronzato,
+                      e_greedy=post_greedy,
+                      greedy=post_greedy,
+                      greedy_first=post_greedy_first,
+                      IDS_freq=post_IDS_freq,
+                      IDS_bayes=post_IDS_bayes,
+                      simple=post_simple)
+  
+  output <- list(exp=exp_output,post=post_output,theta=theta)
+  
+  return(output)
+  
+}
+
+## run the simulations
+## parameters
+p=2
+K=2
+
+N=1000
+sd_X=1
+sd_Y=0.5
+t0=(p+1)*K*3+100
+eps=0.025
+al=0.01
+N_post=500
+M=1000
+
+## how many simulations to run
+r <- 5250
+## Simulate the experiments
+start <- Sys.time()
+sims <- mclapply(X=1:r, 
+                 function(X){sim(N=N,p=p,K=K,sd_X=sd_X,sd_Y=sd_Y,
+                                 t0=t0,eps=eps,al=al,N_post=N_post,M=M)},
+                 mc.cores = 1
+)
+end <- Sys.time()
+
+
+## check bad sims
+good_sets <- c()
+tick=1
+for(i in 1:r){
+  check <- c()
+  for(j in 1:6){
+    check[j] <- is.data.frame(sims[[i]]$exp[[j]])
+  }
+  if(sum(check)==6){
+    good_sets[tick]=i
+    tick=tick+1
+  }else{
+    ## no nothing
+  }
+}
+
+## collect experiment information into one dataframe
+exps <- data.frame()
+post <- data.frame()
+tick <- 1
+for(i in good_sets){
+  
+  ## check convergence for simple randomization
+  exp_simple <- sims[[i]]$exp$train_set
+  fit <- lm(Y~-1+as.factor(A)+as.factor(A):.-as.factor(A):A,
+            data=exp_simple)
+  
+  ## gather parameter convergence information
+  coef_fit <- coef(fit)
+  theta_hat <- c()
+  ## put them in the same format as the theta vector
+  tik <- 1
+  for(ii in 1:K){
+    for(jj in 0:p){
+      theta_hat[tik] <- coef_fit[ii+(K)*jj]
+      tik=tik+1
+    }
+  }
+  
+  ## simple norm
+  simple_norm <- norm(matrix(sims[[i]]$theta-theta_hat),type="F")
+  
+  ## collect experiment information
+  ## pronzato
+  exp_pronzato <- sims[[i]]$exp$pronzato
+  exp_pronzato$R <- NA
+  exp_pronzato$method <- "pronzato"
+  exp_pronzato$rep <- tick
+  exp_pronzato$simple_norm <- simple_norm
+  
+  post_pronzato <- sims[[i]]$post$pronzato
+  post_pronzato$method <- "pronzato"
+  post_pronzato$rep <- tick
+  
+  ## e_greedy
+  exp_e_greedy <- sims[[i]]$exp$e_greedy
+  exp_e_greedy$R <- NA
+  exp_e_greedy$method <- "e_greedy"
+  exp_e_greedy$rep <- tick
+  exp_e_greedy$simple_norm <- simple_norm
+  
+  post_e_greedy <- sims[[i]]$post$e_greedy
+  post_e_greedy$method <- "e_greedy"
+  post_e_greedy$rep <- tick
+  
+  ## greedy
+  exp_greedy <- sims[[i]]$exp$greedy
+  exp_greedy$R <- NA
+  exp_greedy$method <- "greedy"
+  exp_greedy$rep <- tick
+  exp_greedy$simple_norm <- simple_norm
+  
+  post_greedy <- sims[[i]]$post$greedy
+  post_greedy$method <- "greedy"
+  post_greedy$rep <- tick
+  
+  ## greedy first
+  exp_greedy_first <- sims[[i]]$exp$greedy_first
+  exp_greedy_first$method <- "greedy_first"
+  exp_greedy_first$rep <- tick
+  exp_greedy_first$simple_norm <- simple_norm
+  
+  post_greedy_first <- sims[[i]]$post$greedy_first
+  post_greedy_first$method <- "greedy_first"
+  post_greedy_first$rep <- tick
+  
+  ## IDS_freq
+  exp_IDS_freq <- sims[[i]]$exp$IDS_freq
+  exp_IDS_freq$R <- NA
+  exp_IDS_freq$method <- "IDS_freq"
+  exp_IDS_freq$rep <- tick
+  exp_IDS_freq$simple_norm <- simple_norm
+  
+  post_IDS_freq <- sims[[i]]$post$IDS_freq
+  post_IDS_freq$method <- "IDS_freq"
+  post_IDS_freq$rep <- tick
+  
+  ## IDS_bayes
+  exp_IDS_bayes <- sims[[i]]$exp$IDS_bayes
+  exp_IDS_bayes$R <- NA
+  exp_IDS_bayes$method <- "IDS_bayes"
+  exp_IDS_bayes$rep <- tick
+  exp_IDS_bayes$simple_norm <- simple_norm
+  
+  post_IDS_bayes <- sims[[i]]$post$IDS_bayes
+  post_IDS_bayes$method <- "IDS_bayes"
+  post_IDS_bayes$rep <- tick
+  
+  ## simple
+  post_simple <- sims[[i]]$post$simple
+  post_simple$method <- "simple"
+  post_simple$rep <- tick
+  
+  ## create out of trial information
+  ## attach these datasets to the bigger one
+  exps <- rbind(exps,exp_pronzato,exp_greedy,exp_e_greedy,
+                exp_greedy_first,exp_IDS_freq,exp_IDS_bayes)
+  
+  post <- rbind(post,post_pronzato,post_greedy,post_e_greedy,
+                post_greedy_first,post_IDS_freq,post_IDS_bayes,post_simple)
+  
+  
+  ## update the tick
+  tick=tick+1
+  
+}
+
+## save trial information
+exps$K<- K
+exps$p <- p
+post$K <- K
+post$p <- p
+
+save(exps,file=paste0("exps_K=",K,"_p=",p,".RData"))
+save(post,file=paste0("post_K=",K,"_p=",p,".RData"))
+```
+
+#### Analysis Scripts
+```{r analyze,eval=FALSE}
+## load experiment data
+load("exps_K=2_p=2.RData")
+exps22 <- exps; exps <- NULL;
+load("exps_K=2_p=8.RData")
+exps28 <- exps; exps <- NULL;
+load("exps_K=8_p=2.RData")
+exps82 <- exps; exps <- NULL;
+load("exps_K=8_p=8.RData")
+exps88 <- exps; exps <- NULL;
+## put them all together
+exps <- rbind(exps22[,3:14],exps28[,9:20],exps82[,3:14],exps88[,9:20])
+
+## create "scenario" variable
+exps <- exps %>%
+        mutate(scenario=paste0("K=",K," p=",p),
+               burn_in=3*(p+1)*K) %>%
+        filter(rep<=5000)
+
+## analyze cumulative regret 
+regret <- exps %>% filter(sub>burn_in) %>%
+  group_by(scenario,method,rep) %>%
+  mutate(cum_regret=cumsum(regret)) %>%
+  group_by(scenario,method,sub) %>%
+  summarise(mean_regret=mean(cum_regret),
+            median_regret=median(cum_regret),
+            se_regret=sd(cum_regret)/sqrt(5000))
+
+save(regret,file="regret.RData")
+
+## analyze convergence
+theta <- exps %>% filter(sub>burn_in) %>%
+  group_by(scenario,method,sub) %>%
+  mutate(rel_efficiency=simple_norm/norm) %>%
+  summarise(mean_norm=mean(norm),
+            median_norm=median(norm),
+            se_norm=sd(norm)/sqrt(5000),
+            mean_simple_norm=mean(simple_norm)) %>%
+  mutate(rel_eff=mean_simple_norm/mean_norm)
+
+save(theta,file="theta.RData")
+
+## ----------------------------------------------------------------- ##
+## ----------------------------------------------------------------- ##
+
+## post experiment data
+load("post_K=2_p=2.RData")
+post22 <- post; post <- NULL;
+load("post_K=2_p=8.RData")
+post28 <- post; post <- NULL;
+load("post_K=8_p=2.RData")
+post82 <- post; post <- NULL;
+load("post_K=8_p=8.RData")
+post88 <- post; post <- NULL;
+## put them all together
+post <- rbind(post22,post28,post82,post88)
+
+## create scenario column
+## create "scenario" variable
+post <- post %>%
+  mutate(scenario=paste0("K=",K," p=",p)) %>%
+  filter(rep<5000)
+
+## post trial correctimal number correct
+correct_post <- post %>% 
+      group_by(method,scenario,rep) %>%
+      summarise(prop_correct=mean(correct)) %>%
+      group_by(scenario,method) %>%
+      summarise(mean_correct=mean(prop_correct),
+                median_correct=median(prop_correct),
+                se_correct=sd(prop_correct)/sqrt(5000))
+View(correct_post)
+
+save(correct_post,file="correct_post.RData")
+
+regret_post <- post %>% 
+  group_by(method,scenario,rep) %>%
+  summarise(regret=sum(regret)) %>%
+  group_by(scenario,method) %>%
+  summarise(mean_cum_regret=mean(regret),
+            median_cum_regret=median(regret),
+            se_cum_regret=sd(regret)/sqrt(5000))
+
+View(regret_post)
+
+save(regret_post,file="correct_post.RData")
+
+
+## ----------------------------------------------------------------- ##
+## ----------------------------------------------------------------- ##
+
+## calcualte ratios
+regret <- regret %>% filter(sub==1000)
+correct2 <- correct_post %>% filter(method!="simple")
+norm2 <- theta %>% filter(sub==1000)
+regret_ratio <- cbind(regret,correct2,norm2)
+regret_ratio <- regret_ratio %>%
+  mutate(ratio1=mean_regret/mean_correct,
+         ratio2=mean_regret/rel_eff) %>%
+  select(scenario,method,ratio1,ratio2)
+View(regret_ratio)
+```
